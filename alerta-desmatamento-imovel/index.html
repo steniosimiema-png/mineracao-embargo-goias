@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Alertas DETER x Imóveis CAR — Goiás | Drones e Mapas</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  :root {
+    --verde: #1b5e20;
+    --verde-escuro: #0d3d12;
+    --dourado: #ffc400;
+    --cinza: #2b2b2b;
+  }
+  html, body { height:100%; margin:0; font-family: Arial, Helvetica, sans-serif; }
+  #map { position:absolute; top:64px; bottom:0; left:0; right:0; }
+  header {
+    height:64px; background: linear-gradient(90deg, var(--verde-escuro), var(--verde));
+    color:#fff; display:flex; align-items:center; padding:0 18px; box-sizing:border-box;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3); position:relative; z-index:1000;
+  }
+  header h1 { font-size:16px; margin:0; font-weight:700; line-height:1.2; }
+  header .sub { font-size:11px; opacity:0.85; margin-top:2px; }
+  header .brand { margin-left:auto; text-align:right; font-size:11px; opacity:0.9; }
+  header .brand b { color: var(--dourado); }
+
+  .info-panel {
+    position:absolute; top:78px; right:12px; z-index:900; background:rgba(20,20,20,0.92);
+    color:#eee; padding:14px 16px; border-radius:8px; width:260px; font-size:12.5px;
+    box-shadow:0 2px 10px rgba(0,0,0,0.4);
+  }
+  .info-panel h2 { font-size:12px; color:var(--dourado); margin:0 0 8px 0; text-transform:uppercase; letter-spacing:0.5px;}
+  .info-panel .big { font-size:28px; font-weight:800; color:#fff; margin:2px 0 6px 0; }
+  .info-panel ul { margin:6px 0 0 0; padding-left:16px; }
+  .info-panel li { margin-bottom:4px; }
+  .info-panel .note { font-size:10px; color:#aaa; margin-top:8px; border-top:1px solid #444; padding-top:6px;}
+
+  .legend {
+    background: rgba(255,255,255,0.95); padding:10px 12px; border-radius:6px;
+    box-shadow:0 1px 6px rgba(0,0,0,0.3); font-size:12px; line-height:1.6;
+  }
+  .legend h3 { margin:0 0 6px 0; font-size:12px; color:var(--verde-escuro); }
+  .legend .sw { display:inline-block; width:14px; height:14px; border-radius:3px; margin-right:6px; vertical-align:middle; border:1px solid #999;}
+
+  .leaflet-popup-content { font-size:12.5px; line-height:1.5; }
+  .leaflet-popup-content b { color: var(--verde-escuro); }
+  .pct-alta { color:#c62828; font-weight:700; }
+
+  #btn-posse {
+    position:absolute; bottom:24px; right:12px; z-index:900; background:var(--dourado); color:#1b1b1b;
+    border:none; padding:10px 14px; border-radius:22px; font-weight:700; font-size:12.5px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.4); cursor:pointer;
+  }
+  #btn-posse:hover { background:#ffd54f; }
+
+  @media (max-width: 700px) {
+    .info-panel { width: calc(100% - 24px); right:12px; top: auto; bottom: 70px; }
+    #btn-posse { bottom: 12px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Alertas de Desmatamento (DETER) × Imóveis Rurais (CAR) — Goiás</h1>
+    <div class="sub">Estatística zonal em tempo real · Fonte: TerraBrasilis/INPE + SICAR/SFB · Atualizado em 13/09/2026</div>
+  </div>
+  <div class="brand"><b>Drones e Mapas</b><br>O Advogado do Campo Digital</div>
+</header>
+
+<div id="map"></div>
+
+<div class="info-panel">
+  <h2>Panorama estadual 2026</h2>
+  <div class="big">1.192</div>
+  alertas DETER-Cerrado registrados pelo INPE em Goiás (até 13/09)
+  <ul>
+    <li><b>96%</b> dos alertas (1.144) incidem sobre ao menos um imóvel CAR</li>
+    <li><b>1.282</b> imóveis rurais únicos atingidos</li>
+    <li><b>13.786,3 ha</b> em alertas no ano</li>
+    <li><b>12.884,5 ha (93,5%)</b> da área dos alertas cai dentro de algum CAR</li>
+    <li>Caso mais crítico: <b>Posse/GO</b> — 53,3% de um imóvel atingido</li>
+  </ul>
+  <div class="note">Um mesmo alerta pode sobrepor mais de um CAR contíguo/sobreposto (limitação conhecida do cadastro autodeclaratório).</div>
+</div>
+
+<button id="btn-posse">📍 Ir para o caso Posse/GO</button>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map = L.map('map', { zoomControl: true }).setView([-15.8, -49.8], 7);
+
+const satellite = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+  attribution: 'Imagery &copy; Google', maxZoom: 19
+});
+const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
+});
+osm.addTo(map);
+
+const paneOrder = ['municipios','outline','intersecoes','imoveis','alertas'];
+
+function fmt(n, dec=1) {
+  if (n === null || n === undefined) return '—';
+  return Number(n).toLocaleString('pt-BR', {minimumFractionDigits:dec, maximumFractionDigits:dec});
+}
+
+let layerMunicipios, layerOutline, layerAlertas, layerImoveis, layerIntersecoes;
+
+fetch('data/municipios_go.geojson').then(r=>r.json()).then(data => {
+  layerMunicipios = L.geoJSON(data, {
+    style: { color:'#999', weight:0.4, fillColor:'#f5f5f0', fillOpacity:0.5 },
+    onEachFeature: (f, l) => l.bindTooltip(f.properties.NM_MUN, {sticky:true})
+  }).addTo(map);
+  layerMunicipios.bringToBack();
+  buildControl();
+});
+
+fetch('data/go_outline.geojson').then(r=>r.json()).then(data => {
+  layerOutline = L.geoJSON(data, { style: { color:'#222', weight:2, fill:false } }).addTo(map);
+  buildControl();
+});
+
+fetch('data/imoveis_atingidos.geojson').then(r=>r.json()).then(data => {
+  layerImoveis = L.geoJSON(data, {
+    style: f => {
+      const pct = f.properties.pct_imovel_afetado_max || 0;
+      return { color: pct > 40 ? '#ffc400' : '#ff8a00', weight: pct > 40 ? 2 : 1, fillColor:'#ff8a00', fillOpacity:0.12 };
+    },
+    onEachFeature: (f, l) => {
+      const p = f.properties;
+      l.bindPopup(
+        '<b>Imóvel CAR</b><br>' + p.cod_imovel + '<br>' +
+        'Município: ' + (p.municipio||'—') + '<br>' +
+        'Área do imóvel: ' + fmt(p.area_ha_calc) + ' ha<br>' +
+        'Nº de alertas sobre o imóvel: ' + p.n_alertas + '<br>' +
+        'Área total intersectada: ' + fmt(p.area_intersec_total_ha) + ' ha<br>' +
+        '<span class="pct-alta">% do imóvel atingido: ' + fmt(p.pct_imovel_afetado_max) + '%</span>'
+      );
+    }
+  }).addTo(map);
+  buildControl();
+});
+
+fetch('data/intersecoes.geojson').then(r=>r.json()).then(data => {
+  layerIntersecoes = L.geoJSON(data, {
+    style: { color:'#c62828', weight:0.6, fillColor:'#e53935', fillOpacity:0.55 },
+    onEachFeature: (f, l) => {
+      const p = f.properties;
+      l.bindPopup(
+        '<b>Interseção Alerta × Imóvel</b><br>' +
+        'Alerta: ' + p.alert_gid + ' (' + (p.view_date||'—') + ')<br>' +
+        'Imóvel: ' + p.cod_imovel + '<br>' +
+        'Município: ' + (p.municipality||'—') + '<br>' +
+        'Área intersectada: ' + fmt(p.area_intersecao_ha) + ' ha<br>' +
+        '% do alerta dentro do imóvel: ' + fmt(p.pct_alerta_dentro_imovel) + '%<br>' +
+        '% do imóvel afetado: ' + fmt(p.pct_imovel_afetado, 2) + '%'
+      );
+    }
+  }).addTo(map);
+  buildControl();
+});
+
+fetch('data/alertas_deter.geojson').then(r=>r.json()).then(data => {
+  layerAlertas = L.geoJSON(data, {
+    style: f => ({
+      color: f.properties.tem_intersecao ? '#b71c1c' : '#616161',
+      weight: 1,
+      fillColor: f.properties.tem_intersecao ? '#ff1744' : '#9e9e9e',
+      fillOpacity: 0.5
+    }),
+    onEachFeature: (f, l) => {
+      const p = f.properties;
+      l.bindPopup(
+        '<b>Alerta DETER-Cerrado</b><br>' +
+        'GID: ' + p.gid + '<br>' +
+        'Classe: ' + p.classname + '<br>' +
+        'Data de imageamento: ' + p.view_date + '<br>' +
+        'Município: ' + (p.municipality||'—') + '<br>' +
+        'Área do alerta: ' + fmt(p.area_alert_ha) + ' ha<br>' +
+        (p.tem_intersecao ? ('Área sobre CAR: ' + fmt(p.area_intersec_total_ha) + ' ha (' + fmt(p.pct_alerta_em_car) + '%)') : 'Sem CAR sobreposto identificado')
+      );
+    }
+  }).addTo(map);
+  buildControl();
+});
+
+// destaque Posse
+const posseMarker = L.circleMarker([-14.229943703451223, -46.4356110782235], {
+  radius:9, color:'#000', weight:1.5, fillColor:'#ffc400', fillOpacity:1
+}).addTo(map).bindPopup('<b>Caso destacado: Posse/GO</b><br>Alerta DETER nº 47770 (05/05/2026)<br>445,0 ha de alerta · 92,1% dentro de um único imóvel<br><b>53,3% do imóvel (769,4 ha) atingido</b>');
+
+document.getElementById('btn-posse').addEventListener('click', () => {
+  map.setView([-14.11, -46.31], 14);
+  posseMarker.openPopup();
+});
+
+let controlAdded = false;
+function buildControl() {
+  if (controlAdded) return;
+  if (!(layerMunicipios && layerOutline && layerAlertas && layerImoveis && layerIntersecoes)) return;
+  controlAdded = true;
+  const baseMaps = { "Satélite (Google)": satellite, "Mapa (OSM)": osm };
+  const overlays = {
+    "Municípios (GO)": layerMunicipios,
+    "Limite estadual": layerOutline,
+    "Alertas DETER 2026": layerAlertas,
+    "Imóveis CAR atingidos": layerImoveis,
+    "Interseções (área afetada)": layerIntersecoes
+  };
+  L.control.layers(baseMaps, overlays, {collapsed:false}).addTo(map);
+}
+</script>
+</body>
+</html>
