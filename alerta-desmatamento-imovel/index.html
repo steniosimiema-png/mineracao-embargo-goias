@@ -209,7 +209,7 @@ function buildControl() {
     "Imóveis CAR atingidos": layerImoveis,
     "Interseções (área afetada)": layerIntersecoes
   };
-  L.control.layers(baseMaps, overlays, {collapsed:false}).addTo(map);
+  L.control.layers(baseMaps, overlays, {collapsed:false, position:'topleft'}).addTo(map);
 }
 </script>
 </body>
